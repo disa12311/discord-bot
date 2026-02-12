@@ -2,10 +2,10 @@
   "name": "discord-bot-authenticator",
   "version": "1.0.0",
   "description": "Discord bot with TOTP authenticator setup and verification commands",
-  "main": "src/bot.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/bot.js",
-    "check": "node --check src/bot.js"
+    "start": "node index.js",
+    "check": "node --check index.js && node --check src/bot.js"
   },
   "keywords": [
     "discord",

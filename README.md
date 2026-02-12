@@ -33,6 +33,8 @@ cp .env.example .env
 npm start
 ```
 
+Entry point hiện tại là `index.js` (gọi sang `src/bot.js`) để dễ mở rộng/tái cấu trúc.
+
 ## Để bot hoạt động ngay (không chờ slash command global)
 Khai báo thêm `GUILD_ID` trong `.env`:
 ```env
@@ -40,6 +42,15 @@ GUILD_ID=123456789012345678
 ```
 - Có `GUILD_ID`: lệnh xuất hiện gần như ngay lập tức trong server đó.
 - Không có `GUILD_ID`: đăng ký global command, có thể chờ lâu hơn.
+
+## Cấu trúc code (đã refactor)
+- `index.js`: entrypoint
+- `src/bot.js`: bootstrap Discord client + routing interaction
+- `src/commands.js`: định nghĩa slash command + handlers
+- `src/storage.js`: storage layer (MongoDB hoặc JSON fallback)
+- `src/totp.js`: cấu hình và sinh mã TOTP (`otplib`)
+- `src/config.js`: đọc biến môi trường
+- `src/validators.js`: normalize/validate input
 
 ## MongoDB
 Bot đã hỗ trợ MongoDB để lưu vault ổn định hơn.
