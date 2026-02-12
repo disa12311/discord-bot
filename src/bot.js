@@ -6,13 +6,22 @@ const {
   SlashCommandBuilder,
   Events
 } = require('discord.js');
+const { MongoClient } = require('mongodb');
 const { authenticator } = require('otplib');
 require('dotenv').config();
 
 const GUILD_ID = process.env.GUILD_ID || '';
+const MONGODB_URI = process.env.MONGODB_URI || '';
+const MONGODB_DB = process.env.MONGODB_DB || 'discord_auth_bot';
+const MONGODB_COLLECTION = process.env.MONGODB_COLLECTION || 'user_vaults';
+
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const DATA_FILE = path.join(DATA_DIR, 'user-secrets.json');
 
+let mongoClient = null;
+let mongoCollection = null;
+
+const isMongoEnabled = Boolean(MONGODB_URI);
 
 authenticator.options = {
   digits: 6,
@@ -25,6 +34,25 @@ if (!process.env.DISCORD_TOKEN) {
   process.exit(1);
 }
 
+async function initStorage() {
+  if (!isMongoEnabled) {
+    console.log('Storage mode: local file JSON.');
+    return;
+  }
+
+  try {
+    mongoClient = new MongoClient(MONGODB_URI);
+    await mongoClient.connect();
+    mongoCollection = mongoClient.db(MONGODB_DB).collection(MONGODB_COLLECTION);
+    await mongoCollection.createIndex({ userId: 1 }, { unique: true });
+    console.log(`Storage mode: MongoDB (${MONGODB_DB}.${MONGODB_COLLECTION}).`);
+  } catch (error) {
+    console.error('MongoDB connection failed, fallback to local JSON store:', error.message);
+    mongoClient = null;
+    mongoCollection = null;
+  }
+}
+
 function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -35,7 +63,21 @@ function ensureDataFile() {
   }
 }
 
-function readStore() {
+async function readStore() {
+  if (mongoCollection) {
+    const docs = await mongoCollection.find({}).toArray();
+    const store = {};
+
+    for (const doc of docs) {
+      const { _id, userId, ...userData } = doc;
+      if (userId) {
+        store[userId] = userData;
+      }
+    }
+
+    return store;
+  }
+
   ensureDataFile();
 
   try {
@@ -57,7 +99,22 @@ function readStore() {
   }
 }
 
-function writeStore(store) {
+async function writeStore(store) {
+  if (mongoCollection) {
+    const operations = Object.entries(store).map(([userId, userData]) => ({
+      replaceOne: {
+        filter: { userId },
+        replacement: { userId, ...userData },
+        upsert: true
+      }
+    }));
+
+    if (operations.length > 0) {
+      await mongoCollection.bulkWrite(operations, { ordered: false });
+    }
+    return;
+  }
+
   ensureDataFile();
   const tempPath = `${DATA_FILE}.tmp`;
   fs.writeFileSync(tempPath, JSON.stringify(store, null, 2));
@@ -166,38 +223,28 @@ async function handleSave(interaction, store) {
   const secret = normalizeSecret(interaction.options.getString('secret', true));
 
   if (!isValidLabel(label)) {
-    await interaction.reply({
-      content: '❌ Label chỉ được chứa chữ thường, số, `_` hoặc `-`, độ dài 2-32.',
-      ephemeral: true
-    });
+    await interaction.reply({ content: '❌ Label chỉ được chứa chữ thường, số, `_` hoặc `-`, độ dài 2-32.', ephemeral: true });
     return;
   }
 
   if (!isLikelyBase32(secret)) {
-    await interaction.reply({
-      content: '❌ Secret không hợp lệ. Hãy nhập Base32 (A-Z và số 2-7).',
-      ephemeral: true
-    });
+    await interaction.reply({ content: '❌ Secret không hợp lệ. Hãy nhập Base32 (A-Z và số 2-7).', ephemeral: true });
     return;
   }
 
   try {
     generateTotp(secret);
-  } catch (error) {
-    await interaction.reply({
-      content: '❌ Secret không hợp lệ hoặc không thể tạo mã TOTP.',
-      ephemeral: true
-    });
+  } catch {
+    await interaction.reply({ content: '❌ Secret không hợp lệ hoặc không thể tạo mã TOTP.', ephemeral: true });
     return;
   }
 
   userData.secrets[label] = secret;
-
   if (!userData.defaultLabel) {
     userData.defaultLabel = label;
   }
 
-  writeStore(store);
+  await writeStore(store);
 
   await interaction.reply({
     content: `✅ Saved secret with label \`${label}\`. Dùng /auth-code label:${label} để lấy mã 6 số.`,
@@ -211,15 +258,11 @@ async function handleList(interaction, store) {
   const labels = Object.keys(userData.secrets || {}).sort();
 
   if (labels.length === 0) {
-    await interaction.reply({
-      content: 'Bạn chưa lưu secret nào. Dùng `/auth-save` để thêm.',
-      ephemeral: true
-    });
+    await interaction.reply({ content: 'Bạn chưa lưu secret nào. Dùng `/auth-save` để thêm.', ephemeral: true });
     return;
   }
 
   const defaultLabel = userData.defaultLabel ? ` (default: \`${userData.defaultLabel}\`)` : '';
-
   await interaction.reply({
     content: `📋 Saved labels (${labels.length})${defaultLabel}: ${labels.map((x) => `\`${x}\``).join(', ')}`,
     ephemeral: true
@@ -232,10 +275,7 @@ async function handleRemove(interaction, store) {
   const label = normalizeCode(interaction.options.getString('label', true)).toLowerCase();
 
   if (!userData.secrets[label]) {
-    await interaction.reply({
-      content: `Không tìm thấy label \`${label}\`.`,
-      ephemeral: true
-    });
+    await interaction.reply({ content: `Không tìm thấy label \`${label}\`.`, ephemeral: true });
     return;
   }
 
@@ -246,12 +286,8 @@ async function handleRemove(interaction, store) {
     userData.defaultLabel = rest[0] || null;
   }
 
-  writeStore(store);
-
-  await interaction.reply({
-    content: `🗑️ Đã xóa label \`${label}\`.`,
-    ephemeral: true
-  });
+  await writeStore(store);
+  await interaction.reply({ content: `🗑️ Đã xóa label \`${label}\`.`, ephemeral: true });
 }
 
 async function handleSetDefault(interaction, store) {
@@ -260,20 +296,13 @@ async function handleSetDefault(interaction, store) {
   const label = normalizeCode(interaction.options.getString('label', true)).toLowerCase();
 
   if (!userData.secrets[label]) {
-    await interaction.reply({
-      content: `Không tìm thấy label \`${label}\`.`,
-      ephemeral: true
-    });
+    await interaction.reply({ content: `Không tìm thấy label \`${label}\`.`, ephemeral: true });
     return;
   }
 
   userData.defaultLabel = label;
-  writeStore(store);
-
-  await interaction.reply({
-    content: `✅ Default label đã đặt thành \`${label}\`.`,
-    ephemeral: true
-  });
+  await writeStore(store);
+  await interaction.reply({ content: `✅ Default label đã đặt thành \`${label}\`.`, ephemeral: true });
 }
 
 async function handleCode(interaction, store) {
@@ -287,20 +316,14 @@ async function handleCode(interaction, store) {
 
   if (rawSecret) {
     if (!isLikelyBase32(rawSecret)) {
-      await interaction.reply({
-        content: '❌ Secret không hợp lệ. Hãy nhập Base32 (A-Z và số 2-7).',
-        ephemeral: true
-      });
+      await interaction.reply({ content: '❌ Secret không hợp lệ. Hãy nhập Base32 (A-Z và số 2-7).', ephemeral: true });
       return;
     }
 
     try {
       generateTotp(rawSecret);
-    } catch (error) {
-      await interaction.reply({
-        content: '❌ Secret nhập tay không hợp lệ cho TOTP.',
-        ephemeral: true
-      });
+    } catch {
+      await interaction.reply({ content: '❌ Secret nhập tay không hợp lệ cho TOTP.', ephemeral: true });
       return;
     }
 
@@ -325,10 +348,7 @@ async function handleCode(interaction, store) {
   const code = generateTotp(secretToUse);
 
   if (!isValidCodeFormat(code)) {
-    await interaction.reply({
-      content: '❌ Không thể tạo mã 6 chữ số từ secret hiện tại.',
-      ephemeral: true
-    });
+    await interaction.reply({ content: '❌ Không thể tạo mã 6 chữ số từ secret hiện tại.', ephemeral: true });
     return;
   }
 
@@ -361,16 +381,15 @@ async function registerCommands(client) {
   console.log('Registered slash commands globally (may take a while to appear).');
 }
 
-const client = new Client({
-  intents: [GatewayIntentBits.Guilds]
-});
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 client.once(Events.ClientReady, async (readyClient) => {
   try {
     console.log(`Logged in as ${readyClient.user.tag}`);
+    await initStorage();
     await registerCommands(readyClient);
   } catch (error) {
-    console.error('Failed to register slash commands:', error);
+    console.error('Failed to initialize bot:', error);
   }
 });
 
@@ -379,53 +398,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
-  const store = readStore();
+  const store = await readStore();
 
   try {
-    if (interaction.commandName === 'auth-save') {
-      await handleSave(interaction, store);
-      return;
-    }
-
-    if (interaction.commandName === 'auth-list') {
-      await handleList(interaction, store);
-      return;
-    }
-
-    if (interaction.commandName === 'auth-remove') {
-      await handleRemove(interaction, store);
-      return;
-    }
-
-    if (interaction.commandName === 'auth-set-default') {
-      await handleSetDefault(interaction, store);
-      return;
-    }
-
-    if (interaction.commandName === 'auth-code') {
-      await handleCode(interaction, store);
-      return;
-    }
-
-    if (interaction.commandName === 'auth-status') {
-      await handleStatus(interaction, store);
-      return;
-    }
+    if (interaction.commandName === 'auth-save') return await handleSave(interaction, store);
+    if (interaction.commandName === 'auth-list') return await handleList(interaction, store);
+    if (interaction.commandName === 'auth-remove') return await handleRemove(interaction, store);
+    if (interaction.commandName === 'auth-set-default') return await handleSetDefault(interaction, store);
+    if (interaction.commandName === 'auth-code') return await handleCode(interaction, store);
+    if (interaction.commandName === 'auth-status') return await handleStatus(interaction, store);
   } catch (error) {
     console.error('Error handling command:', error);
 
     if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: 'Something went wrong while handling your command.',
-        ephemeral: true
-      });
+      await interaction.followUp({ content: 'Something went wrong while handling your command.', ephemeral: true });
       return;
     }
 
-    await interaction.reply({
-      content: 'Something went wrong while handling your command.',
-      ephemeral: true
-    });
+    await interaction.reply({ content: 'Something went wrong while handling your command.', ephemeral: true });
   }
 });
 

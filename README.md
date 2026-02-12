@@ -41,6 +41,19 @@ GUILD_ID=123456789012345678
 - Có `GUILD_ID`: lệnh xuất hiện gần như ngay lập tức trong server đó.
 - Không có `GUILD_ID`: đăng ký global command, có thể chờ lâu hơn.
 
+## MongoDB
+Bot đã hỗ trợ MongoDB để lưu vault ổn định hơn.
+
+Thêm vào `.env`:
+```env
+MONGODB_URI=mongodb://localhost:27017
+MONGODB_DB=discord_auth_bot
+MONGODB_COLLECTION=user_vaults
+```
+
+- Nếu có `MONGODB_URI`: bot dùng MongoDB.
+- Nếu không có: bot tự fallback về file `data/user-secrets.json`.
+
 ## Lưu ý cấu hình Discord Developer Portal
 Trong phần Bot:
 - **Không cần** bật `MESSAGE CONTENT INTENT`.
