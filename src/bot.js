@@ -66,6 +66,9 @@ const commands = [
     .setName('auth-status')
     .setDescription('Show whether your authenticator is enabled.'),
   new SlashCommandBuilder()
+    .setName('auth-code')
+    .setDescription('Generate current 6-digit TOTP code from your enabled secret.'),
+  new SlashCommandBuilder()
     .setName('auth-disable')
     .setDescription('Disable authenticator after validating a 6-digit code.')
     .addStringOption((option) =>
@@ -245,6 +248,31 @@ async function handleDisable(interaction, store, token) {
   });
 }
 
+
+async function handleCode(interaction, store) {
+  const userId = interaction.user.id;
+  const userData = store[userId];
+
+  if (!userData || !userData.enabledSecret) {
+    await interaction.reply({
+      content: 'You need to enable authenticator first with `/auth-setup` and `/auth-verify`.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  const code = speakeasy.totp({
+    secret: userData.enabledSecret,
+    encoding: 'base32',
+    digits: 6
+  });
+
+  await interaction.reply({
+    content: `🔐 Current TOTP code: **${code}** (valid ~30s, same standard as Google Authenticator).`,
+    ephemeral: true
+  });
+}
+
 async function registerCommands(client) {
   if (GUILD_ID) {
     const guild = await client.guilds.fetch(GUILD_ID);
@@ -290,6 +318,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.commandName === 'auth-status') {
       await handleStatus(interaction, store);
+      return;
+    }
+
+    if (interaction.commandName === 'auth-code') {
+      await handleCode(interaction, store);
       return;
     }
 

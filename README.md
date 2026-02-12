@@ -7,6 +7,7 @@ Bot Discord hỗ trợ xác thực 2 lớp (TOTP) bằng Google Authenticator/Au
 - `/auth-verify code:<6-digit>`: Xác nhận code để bật authenticator.
 - `/auth-status`: Kiểm tra trạng thái bật/tắt.
 - `/auth-disable code:<6-digit>`: Tắt authenticator (cần code hợp lệ).
+- `/auth-code`: Tạo mã TOTP 6 chữ số hiện tại (chuẩn như Google Authenticator/Authy).
 
 ## Cài đặt
 ```bash
@@ -39,5 +40,6 @@ Trong phần Bot:
 Bot chỉ dùng intent `Guilds`, không còn dùng `MessageContent`, nên không bị Discord từ chối vì privileged intent chưa bật.
 
 ## Bảo mật
+- Lệnh `/auth-code` chỉ trả về bằng **ephemeral** để hạn chế lộ mã ra channel chung.
 - Secret đang được lưu local tại `data/user-secrets.json`.
 - Production nên dùng database + encryption (KMS/secret manager) thay vì file JSON.
