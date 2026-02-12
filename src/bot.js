@@ -12,7 +12,9 @@ const QRCode = require('qrcode');
 require('dotenv').config();
 
 const ISSUER = process.env.AUTH_ISSUER || 'DiscordAuthenticator';
-const DATA_FILE = path.join(__dirname, '..', 'data', 'user-secrets.json');
+const GUILD_ID = process.env.GUILD_ID || '';
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_FILE = path.join(DATA_DIR, 'user-secrets.json');
 
 if (!process.env.DISCORD_TOKEN) {
   console.error('Missing DISCORD_TOKEN in environment.');
@@ -20,6 +22,10 @@ if (!process.env.DISCORD_TOKEN) {
 }
 
 function ensureDataFile() {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+
   if (!fs.existsSync(DATA_FILE)) {
     fs.writeFileSync(DATA_FILE, JSON.stringify({}, null, 2));
   }
@@ -31,7 +37,16 @@ function readStore() {
 }
 
 function writeStore(store) {
+  ensureDataFile();
   fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2));
+}
+
+function normalizeCode(input) {
+  return String(input || '').trim();
+}
+
+function isValidCodeFormat(input) {
+  return /^\d{6}$/.test(normalizeCode(input));
 }
 
 const commands = [
@@ -79,7 +94,7 @@ async function handleSetup(interaction, store) {
   writeStore(store);
 
   const qrDataUrl = await QRCode.toDataURL(secret.otpauth_url);
-  const attachmentPath = path.join(__dirname, '..', 'data', `${userId}-qr.png`);
+  const attachmentPath = path.join(DATA_DIR, `${userId}-qr.png`);
   const base64 = qrDataUrl.replace(/^data:image\/png;base64,/, '');
   fs.writeFileSync(attachmentPath, Buffer.from(base64, 'base64'));
 
@@ -119,6 +134,16 @@ async function handleSetup(interaction, store) {
 }
 
 async function handleVerify(interaction, store, token) {
+  const code = normalizeCode(token);
+
+  if (!isValidCodeFormat(code)) {
+    await interaction.reply({
+      content: '❌ Invalid code format. Please enter exactly 6 digits.',
+      ephemeral: true
+    });
+    return;
+  }
+
   const userId = interaction.user.id;
   const userData = store[userId];
 
@@ -133,7 +158,7 @@ async function handleVerify(interaction, store, token) {
   const ok = speakeasy.totp.verify({
     secret: userData.tempSecret,
     encoding: 'base32',
-    token,
+    token: code,
     window: 1
   });
 
@@ -171,6 +196,16 @@ async function handleStatus(interaction, store) {
 }
 
 async function handleDisable(interaction, store, token) {
+  const code = normalizeCode(token);
+
+  if (!isValidCodeFormat(code)) {
+    await interaction.reply({
+      content: '❌ Invalid code format. Please enter exactly 6 digits.',
+      ephemeral: true
+    });
+    return;
+  }
+
   const userId = interaction.user.id;
   const userData = store[userId];
 
@@ -185,7 +220,7 @@ async function handleDisable(interaction, store, token) {
   const ok = speakeasy.totp.verify({
     secret: userData.enabledSecret,
     encoding: 'base32',
-    token,
+    token: code,
     window: 1
   });
 
@@ -210,14 +245,29 @@ async function handleDisable(interaction, store, token) {
   });
 }
 
+async function registerCommands(client) {
+  if (GUILD_ID) {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    await guild.commands.set(commands);
+    console.log(`Registered slash commands for guild ${GUILD_ID}.`);
+    return;
+  }
+
+  await client.application.commands.set(commands);
+  console.log('Registered slash commands globally (may take a while to appear).');
+}
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
 client.once(Events.ClientReady, async (readyClient) => {
-  console.log(`Logged in as ${readyClient.user.tag}`);
-  await readyClient.application.commands.set(commands);
-  console.log('Registered slash commands globally.');
+  try {
+    console.log(`Logged in as ${readyClient.user.tag}`);
+    await registerCommands(readyClient);
+  } catch (error) {
+    console.error('Failed to register slash commands:', error);
+  }
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {

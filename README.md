@@ -21,15 +21,22 @@ cp .env.example .env
 npm start
 ```
 
+## Để bot hoạt động ngay (không chờ slash command global)
+Khai báo thêm `GUILD_ID` trong `.env`:
+```env
+GUILD_ID=123456789012345678
+```
+- Khi có `GUILD_ID`, bot đăng ký slash command trực tiếp vào server đó (hiện gần như ngay lập tức).
+- Nếu không có `GUILD_ID`, bot đăng ký global command (có thể mất vài phút đến lâu hơn để hiện).
+
 ## Lưu ý cấu hình Discord Developer Portal
 Trong phần Bot:
-- Bật **SERVER MEMBERS INTENT** là không bắt buộc cho bot này.
-- Bật **MESSAGE CONTENT INTENT** là không cần thiết (bot dùng slash commands).
+- **Không cần** bật `MESSAGE CONTENT INTENT`.
 - Mời bot vào server với scope `bot` và `applications.commands`.
 - Cho phép bot có thể DM user (user cũng cần mở DM từ server members).
 
 ## Vì sao fix được lỗi "Used disallowed intents"?
-Bot mới chỉ dùng intent `Guilds`, không còn dùng `MessageContent`, nên sẽ không bị Discord từ chối vì privileged intent chưa bật.
+Bot chỉ dùng intent `Guilds`, không còn dùng `MessageContent`, nên không bị Discord từ chối vì privileged intent chưa bật.
 
 ## Bảo mật
 - Secret đang được lưu local tại `data/user-secrets.json`.
