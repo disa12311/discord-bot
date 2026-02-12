@@ -1,0 +1,52 @@
+# Discord Bot Authenticator
+
+Bot Discord tạo mã TOTP 6 số (Google Authenticator/Authy compatible), tập trung vào độ ổn định và quản lý nhiều secret.
+
+Hiện bot dùng thư viện **otplib** để sinh mã TOTP 6 số (chuẩn RFC, tương thích Google Authenticator/Authy).
+
+## Có bỏ `/auth-setup`, `/auth-verify`, `/auth-disable` không?
+Có. Bot đã được đơn giản hóa để giảm lỗi runtime và dễ dùng hơn:
+- **Bỏ**: `/auth-setup`, `/auth-verify`, `/auth-disable`.
+- **Giữ + mở rộng**: quản lý secret trực tiếp bằng label.
+
+## Lệnh hiện có
+- `/auth-save label:<name> secret:<base32>`: Lưu secret mới.
+- `/auth-list`: Xem toàn bộ label đã lưu.
+- `/auth-remove label:<name>`: Xóa một secret theo label.
+- `/auth-set-default label:<name>`: Đặt label mặc định cho `/auth-code`.
+- `/auth-code [label] [secret]`: Lấy mã TOTP 6 số từ:
+  - secret nhập trực tiếp,
+  - hoặc label đã lưu,
+  - hoặc default label nếu không truyền gì.
+- `/auth-status`: Kiểm tra số label đã lưu + default label.
+
+## Cài đặt
+```bash
+npm install
+cp .env.example .env
+```
+
+Điền `DISCORD_TOKEN` vào file `.env`.
+
+## Chạy bot
+```bash
+npm start
+```
+
+## Để bot hoạt động ngay (không chờ slash command global)
+Khai báo thêm `GUILD_ID` trong `.env`:
+```env
+GUILD_ID=123456789012345678
+```
+- Có `GUILD_ID`: lệnh xuất hiện gần như ngay lập tức trong server đó.
+- Không có `GUILD_ID`: đăng ký global command, có thể chờ lâu hơn.
+
+## Lưu ý cấu hình Discord Developer Portal
+Trong phần Bot:
+- **Không cần** bật `MESSAGE CONTENT INTENT`.
+- Mời bot vào server với scope `bot` và `applications.commands`.
+
+## Bảo mật
+- Kết quả lệnh được trả bằng **ephemeral** để hạn chế lộ mã.
+- Secret đang lưu local tại `data/user-secrets.json`.
+- Nên dùng DB + encryption cho production.
