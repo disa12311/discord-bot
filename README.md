@@ -81,6 +81,22 @@ MONGODB_COLLECTION=user_vaults
 - Nếu có `MONGODB_URI`: bot dùng MongoDB.
 - Nếu không có: bot tự fallback về file `data/user-secrets.json`.
 
+
+### Xử lý lỗi TLS MongoDB trong container
+Nếu bạn thấy lỗi kiểu `SSL routines ... tlsv1 alert internal error`:
+- Nếu Mongo của bạn **không dùng TLS**, set:
+```env
+MONGODB_TLS=false
+```
+- Nếu Mongo có cert self-signed/lab, có thể tạm set:
+```env
+MONGODB_TLS_ALLOW_INVALID_CERTIFICATES=true
+```
+- Có thể tăng timeout chọn server:
+```env
+MONGODB_SERVER_SELECTION_TIMEOUT_MS=10000
+```
+
 ## Lưu ý cấu hình Discord Developer Portal
 Trong phần Bot:
 - **Không cần** bật `MESSAGE CONTENT INTENT`.

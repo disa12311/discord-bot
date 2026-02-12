@@ -17,13 +17,26 @@ function createStorage(config) {
     }
 
     try {
-      mongoClient = new MongoClient(config.mongodbUri);
+      const mongoClientOptions = {
+        serverSelectionTimeoutMS: config.mongodbServerSelectionTimeoutMs
+      };
+
+      if (typeof config.mongodbTls === 'boolean') {
+        mongoClientOptions.tls = config.mongodbTls;
+      }
+
+      if (config.mongodbTlsAllowInvalidCertificates) {
+        mongoClientOptions.tlsAllowInvalidCertificates = true;
+      }
+
+      mongoClient = new MongoClient(config.mongodbUri, mongoClientOptions);
       await mongoClient.connect();
       mongoCollection = mongoClient.db(config.mongodbDb).collection(config.mongodbCollection);
       await mongoCollection.createIndex({ userId: 1 }, { unique: true });
       console.log(`Storage mode: MongoDB (${config.mongodbDb}.${config.mongodbCollection}).`);
     } catch (error) {
       console.error('MongoDB connection failed, fallback to local JSON store:', error.message);
+      console.error('Tip: check MONGODB_TLS / MONGODB_TLS_ALLOW_INVALID_CERTIFICATES if your server has TLS constraints.');
       mongoClient = null;
       mongoCollection = null;
     }
