@@ -1,11 +1,16 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require('discord.js');
+const {
+  Client,
+  GatewayIntentBits,
+  EmbedBuilder,
+  SlashCommandBuilder,
+  Events
+} = require('discord.js');
 const speakeasy = require('speakeasy');
 const QRCode = require('qrcode');
 require('dotenv').config();
 
-const PREFIX = process.env.BOT_PREFIX || '!auth';
 const ISSUER = process.env.AUTH_ISSUER || 'DiscordAuthenticator';
 const DATA_FILE = path.join(__dirname, '..', 'data', 'user-secrets.json');
 
@@ -29,18 +34,36 @@ function writeStore(store) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2));
 }
 
-function getHelpText() {
-  return [
-    `\`${PREFIX} setup\` - Create a new authenticator secret and receive a QR code in DM.`,
-    `\`${PREFIX} verify <6-digit-code>\` - Verify and enable 2FA for your user.`,
-    `\`${PREFIX} status\` - Show whether your authenticator is enabled.`,
-    `\`${PREFIX} disable <6-digit-code>\` - Disable authenticator after code verification.`
-  ].join('\n');
-}
+const commands = [
+  new SlashCommandBuilder()
+    .setName('auth-setup')
+    .setDescription('Create a new authenticator secret and receive a QR code in DM.'),
+  new SlashCommandBuilder()
+    .setName('auth-verify')
+    .setDescription('Verify and enable your authenticator with a 6-digit code.')
+    .addStringOption((option) =>
+      option
+        .setName('code')
+        .setDescription('6-digit code from your authenticator app')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('auth-status')
+    .setDescription('Show whether your authenticator is enabled.'),
+  new SlashCommandBuilder()
+    .setName('auth-disable')
+    .setDescription('Disable authenticator after validating a 6-digit code.')
+    .addStringOption((option) =>
+      option
+        .setName('code')
+        .setDescription('6-digit code from your authenticator app')
+        .setRequired(true)
+    )
+].map((c) => c.toJSON());
 
-async function handleSetup(message, store) {
-  const userId = message.author.id;
-  const accountLabel = `${ISSUER}:${message.author.username}`;
+async function handleSetup(interaction, store) {
+  const userId = interaction.user.id;
+  const accountLabel = `${ISSUER}:${interaction.user.username}`;
 
   const secret = speakeasy.generateSecret({
     name: accountLabel,
@@ -67,21 +90,27 @@ async function handleSetup(message, store) {
       [
         'Scan the QR code with Google Authenticator, Authy, or any TOTP app.',
         `If QR fails, use this secret manually: \`${secret.base32}\``,
-        `Then verify in server with: \`${PREFIX} verify <code>\``
+        'Then run `/auth-verify` in server with your code.'
       ].join('\n')
     )
     .setImage(`attachment://${userId}-qr.png`)
     .setTimestamp();
 
   try {
-    await message.author.send({
+    await interaction.user.send({
       embeds: [dmEmbed],
       files: [{ attachment: attachmentPath, name: `${userId}-qr.png` }]
     });
 
-    await message.reply('✅ I sent setup instructions to your DM.');
+    await interaction.reply({
+      content: '✅ I sent setup instructions to your DM.',
+      ephemeral: true
+    });
   } catch (error) {
-    await message.reply('❌ I could not DM you. Please enable DMs from server members and try again.');
+    await interaction.reply({
+      content: '❌ I could not DM you. Please enable DMs from server members and try again.',
+      ephemeral: true
+    });
   } finally {
     if (fs.existsSync(attachmentPath)) {
       fs.unlinkSync(attachmentPath);
@@ -89,12 +118,15 @@ async function handleSetup(message, store) {
   }
 }
 
-async function handleVerify(message, store, token) {
-  const userId = message.author.id;
+async function handleVerify(interaction, store, token) {
+  const userId = interaction.user.id;
   const userData = store[userId];
 
   if (!userData || !userData.tempSecret) {
-    await message.reply(`You need to run \`${PREFIX} setup\` first.`);
+    await interaction.reply({
+      content: 'You need to run `/auth-setup` first.',
+      ephemeral: true
+    });
     return;
   }
 
@@ -106,7 +138,10 @@ async function handleVerify(message, store, token) {
   });
 
   if (!ok) {
-    await message.reply('❌ Invalid authenticator code. Please try again.');
+    await interaction.reply({
+      content: '❌ Invalid authenticator code. Please try again.',
+      ephemeral: true
+    });
     return;
   }
 
@@ -116,28 +151,34 @@ async function handleVerify(message, store, token) {
   store[userId] = userData;
   writeStore(store);
 
-  await message.reply('✅ Authenticator enabled successfully.');
+  await interaction.reply({
+    content: '✅ Authenticator enabled successfully.',
+    ephemeral: true
+  });
 }
 
-async function handleStatus(message, store) {
-  const userId = message.author.id;
+async function handleStatus(interaction, store) {
+  const userId = interaction.user.id;
   const userData = store[userId];
   const enabled = Boolean(userData && userData.enabledSecret);
 
-  if (!enabled) {
-    await message.reply('Your authenticator is currently **disabled**.');
-    return;
-  }
-
-  await message.reply('Your authenticator is currently **enabled**.');
+  await interaction.reply({
+    content: enabled
+      ? 'Your authenticator is currently **enabled**.'
+      : 'Your authenticator is currently **disabled**.',
+    ephemeral: true
+  });
 }
 
-async function handleDisable(message, store, token) {
-  const userId = message.author.id;
+async function handleDisable(interaction, store, token) {
+  const userId = interaction.user.id;
   const userData = store[userId];
 
   if (!userData || !userData.enabledSecret) {
-    await message.reply('Authenticator is already disabled.');
+    await interaction.reply({
+      content: 'Authenticator is already disabled.',
+      ephemeral: true
+    });
     return;
   }
 
@@ -149,7 +190,10 @@ async function handleDisable(message, store, token) {
   });
 
   if (!ok) {
-    await message.reply('❌ Invalid authenticator code. Disable request rejected.');
+    await interaction.reply({
+      content: '❌ Invalid authenticator code. Disable request rejected.',
+      ephemeral: true
+    });
     return;
   }
 
@@ -160,65 +204,63 @@ async function handleDisable(message, store, token) {
   };
   writeStore(store);
 
-  await message.reply('✅ Authenticator disabled.');
+  await interaction.reply({
+    content: '✅ Authenticator disabled.',
+    ephemeral: true
+  });
 }
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.DirectMessages],
-  partials: [Partials.Channel]
+  intents: [GatewayIntentBits.Guilds]
 });
 
-client.on('ready', () => {
-  console.log(`Logged in as ${client.user.tag}`);
+client.once(Events.ClientReady, async (readyClient) => {
+  console.log(`Logged in as ${readyClient.user.tag}`);
+  await readyClient.application.commands.set(commands);
+  console.log('Registered slash commands globally.');
 });
 
-client.on('messageCreate', async (message) => {
-  if (message.author.bot || !message.content.startsWith(PREFIX)) {
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand()) {
     return;
   }
 
   const store = readStore();
-  const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
-  const command = (args.shift() || '').toLowerCase();
 
   try {
-    if (!command || command === 'help') {
-      await message.reply(getHelpText());
+    if (interaction.commandName === 'auth-setup') {
+      await handleSetup(interaction, store);
       return;
     }
 
-    if (command === 'setup') {
-      await handleSetup(message, store);
+    if (interaction.commandName === 'auth-verify') {
+      await handleVerify(interaction, store, interaction.options.getString('code', true));
       return;
     }
 
-    if (command === 'verify') {
-      if (!args[0]) {
-        await message.reply(`Usage: \`${PREFIX} verify <6-digit-code>\``);
-        return;
-      }
-      await handleVerify(message, store, args[0]);
+    if (interaction.commandName === 'auth-status') {
+      await handleStatus(interaction, store);
       return;
     }
 
-    if (command === 'status') {
-      await handleStatus(message, store);
-      return;
+    if (interaction.commandName === 'auth-disable') {
+      await handleDisable(interaction, store, interaction.options.getString('code', true));
     }
-
-    if (command === 'disable') {
-      if (!args[0]) {
-        await message.reply(`Usage: \`${PREFIX} disable <6-digit-code>\``);
-        return;
-      }
-      await handleDisable(message, store, args[0]);
-      return;
-    }
-
-    await message.reply(`Unknown command.\n${getHelpText()}`);
   } catch (error) {
     console.error('Error handling command:', error);
-    await message.reply('Something went wrong while handling your command.');
+
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
+        content: 'Something went wrong while handling your command.',
+        ephemeral: true
+      });
+      return;
+    }
+
+    await interaction.reply({
+      content: 'Something went wrong while handling your command.',
+      ephemeral: true
+    });
   }
 });
 
