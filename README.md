@@ -1,13 +1,19 @@
 # Discord Bot Authenticator
 
-Bot Discord hỗ trợ xác thực 2 lớp (TOTP) bằng Google Authenticator/Authy.
+Bot Discord hỗ trợ xác thực 2 lớp (TOTP) bằng Google Authenticator/Authy và quản lý nhiều secret.
 
 ## Tính năng
 - `/auth-setup`: Tạo secret mới và gửi QR code qua DM.
-- `/auth-verify code:<6-digit>`: Xác nhận code để bật authenticator.
-- `/auth-status`: Kiểm tra trạng thái bật/tắt.
-- `/auth-disable code:<6-digit>`: Tắt authenticator (cần code hợp lệ).
-- `/auth-code`: Tạo mã TOTP 6 chữ số hiện tại (chuẩn như Google Authenticator/Authy).
+- `/auth-verify code:<6-digit>`: Xác nhận code để bật authenticator mặc định.
+- `/auth-status`: Kiểm tra trạng thái bật/tắt và số lượng label đã lưu.
+- `/auth-save label:<name> secret:<base32>`: Lưu secret mới để quản lý nhiều mã.
+- `/auth-list`: Xem danh sách label đã lưu.
+- `/auth-remove label:<name>`: Xóa một secret theo label.
+- `/auth-code [label] [secret]`: Lấy mã TOTP 6 số từ:
+  - secret nhập trực tiếp,
+  - hoặc label đã lưu,
+  - hoặc `default` nếu không truyền gì.
+- `/auth-disable code:<6-digit>`: Tắt authenticator mặc định (không xóa các label đã lưu).
 
 ## Cài đặt
 ```bash
@@ -36,10 +42,7 @@ Trong phần Bot:
 - Mời bot vào server với scope `bot` và `applications.commands`.
 - Cho phép bot có thể DM user (user cũng cần mở DM từ server members).
 
-## Vì sao fix được lỗi "Used disallowed intents"?
-Bot chỉ dùng intent `Guilds`, không còn dùng `MessageContent`, nên không bị Discord từ chối vì privileged intent chưa bật.
-
 ## Bảo mật
-- Lệnh `/auth-code` chỉ trả về bằng **ephemeral** để hạn chế lộ mã ra channel chung.
+- Tất cả kết quả lệnh đang trả về dạng **ephemeral** để hạn chế lộ mã ra channel chung.
 - Secret đang được lưu local tại `data/user-secrets.json`.
 - Production nên dùng database + encryption (KMS/secret manager) thay vì file JSON.

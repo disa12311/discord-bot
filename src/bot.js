@@ -49,6 +49,40 @@ function isValidCodeFormat(input) {
   return /^\d{6}$/.test(normalizeCode(input));
 }
 
+function normalizeSecret(input) {
+  return String(input || '')
+    .toUpperCase()
+    .replace(/\s+/g, '')
+    .replace(/-/g, '');
+}
+
+function isLikelyBase32(input) {
+  return /^[A-Z2-7]+=*$/.test(input);
+}
+
+function getUserVault(store, userId) {
+  const userData = store[userId] || {};
+
+  if (!userData.secrets || typeof userData.secrets !== 'object') {
+    userData.secrets = {};
+  }
+
+  if (userData.enabledSecret && !userData.secrets.default) {
+    userData.secrets.default = userData.enabledSecret;
+  }
+
+  store[userId] = userData;
+  return userData;
+}
+
+function generateTotp(secret) {
+  return speakeasy.totp({
+    secret,
+    encoding: 'base32',
+    digits: 6
+  });
+}
+
 const commands = [
   new SlashCommandBuilder()
     .setName('auth-setup')
@@ -67,10 +101,49 @@ const commands = [
     .setDescription('Show whether your authenticator is enabled.'),
   new SlashCommandBuilder()
     .setName('auth-code')
-    .setDescription('Generate current 6-digit TOTP code from your enabled secret.'),
+    .setDescription('Generate a current 6-digit TOTP code.')
+    .addStringOption((option) =>
+      option
+        .setName('label')
+        .setDescription('Saved label to generate code from (example: gmail)')
+        .setRequired(false)
+    )
+    .addStringOption((option) =>
+      option
+        .setName('secret')
+        .setDescription('Optional Base32 secret for one-time code generation')
+        .setRequired(false)
+    ),
+  new SlashCommandBuilder()
+    .setName('auth-save')
+    .setDescription('Save a Base32 secret with a label for multi-account management.')
+    .addStringOption((option) =>
+      option
+        .setName('label')
+        .setDescription('Name for this secret, e.g. gmail, github, aws')
+        .setRequired(true)
+    )
+    .addStringOption((option) =>
+      option
+        .setName('secret')
+        .setDescription('Base32 secret from authenticator setup')
+        .setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName('auth-list')
+    .setDescription('List all saved secret labels.'),
+  new SlashCommandBuilder()
+    .setName('auth-remove')
+    .setDescription('Remove one saved secret by label.')
+    .addStringOption((option) =>
+      option
+        .setName('label')
+        .setDescription('Label to remove')
+        .setRequired(true)
+    ),
   new SlashCommandBuilder()
     .setName('auth-disable')
-    .setDescription('Disable authenticator after validating a 6-digit code.')
+    .setDescription('Disable default authenticator after validating a 6-digit code.')
     .addStringOption((option) =>
       option
         .setName('code')
@@ -89,11 +162,9 @@ async function handleSetup(interaction, store) {
     length: 32
   });
 
-  store[userId] = {
-    tempSecret: secret.base32,
-    enabledSecret: null,
-    createdAt: new Date().toISOString()
-  };
+  const userData = getUserVault(store, userId);
+  userData.tempSecret = secret.base32;
+  userData.createdAt = userData.createdAt || new Date().toISOString();
   writeStore(store);
 
   const qrDataUrl = await QRCode.toDataURL(secret.otpauth_url);
@@ -148,9 +219,9 @@ async function handleVerify(interaction, store, token) {
   }
 
   const userId = interaction.user.id;
-  const userData = store[userId];
+  const userData = getUserVault(store, userId);
 
-  if (!userData || !userData.tempSecret) {
+  if (!userData.tempSecret) {
     await interaction.reply({
       content: 'You need to run `/auth-setup` first.',
       ephemeral: true
@@ -174,26 +245,27 @@ async function handleVerify(interaction, store, token) {
   }
 
   userData.enabledSecret = userData.tempSecret;
+  userData.secrets.default = userData.tempSecret;
   userData.tempSecret = null;
   userData.enabledAt = new Date().toISOString();
-  store[userId] = userData;
   writeStore(store);
 
   await interaction.reply({
-    content: '✅ Authenticator enabled successfully.',
+    content: '✅ Authenticator enabled successfully. Saved as label `default`.',
     ephemeral: true
   });
 }
 
 async function handleStatus(interaction, store) {
   const userId = interaction.user.id;
-  const userData = store[userId];
-  const enabled = Boolean(userData && userData.enabledSecret);
+  const userData = getUserVault(store, userId);
+  const enabled = Boolean(userData.enabledSecret);
+  const labels = Object.keys(userData.secrets || {});
 
   await interaction.reply({
     content: enabled
-      ? 'Your authenticator is currently **enabled**.'
-      : 'Your authenticator is currently **disabled**.',
+      ? `Your default authenticator is **enabled**. Saved labels: **${labels.length}**.`
+      : `Your default authenticator is **disabled**. Saved labels: **${labels.length}**.`,
     ephemeral: true
   });
 }
@@ -210,11 +282,11 @@ async function handleDisable(interaction, store, token) {
   }
 
   const userId = interaction.user.id;
-  const userData = store[userId];
+  const userData = getUserVault(store, userId);
 
-  if (!userData || !userData.enabledSecret) {
+  if (!userData.enabledSecret) {
     await interaction.reply({
-      content: 'Authenticator is already disabled.',
+      content: 'Default authenticator is already disabled.',
       ephemeral: true
     });
     return;
@@ -235,40 +307,134 @@ async function handleDisable(interaction, store, token) {
     return;
   }
 
-  store[userId] = {
-    tempSecret: null,
-    enabledSecret: null,
-    disabledAt: new Date().toISOString()
-  };
+  userData.tempSecret = null;
+  userData.enabledSecret = null;
+  userData.disabledAt = new Date().toISOString();
   writeStore(store);
 
   await interaction.reply({
-    content: '✅ Authenticator disabled.',
+    content: '✅ Default authenticator disabled (saved labels are still kept).',
     ephemeral: true
   });
 }
 
-
 async function handleCode(interaction, store) {
   const userId = interaction.user.id;
-  const userData = store[userId];
+  const userData = getUserVault(store, userId);
+  const label = normalizeCode(interaction.options.getString('label', false)).toLowerCase();
+  const rawSecret = normalizeSecret(interaction.options.getString('secret', false));
 
-  if (!userData || !userData.enabledSecret) {
+  let secretToUse = '';
+  let source = '';
+
+  if (rawSecret) {
+    if (!isLikelyBase32(rawSecret)) {
+      await interaction.reply({
+        content: '❌ Secret không hợp lệ. Hãy nhập Base32 (A-Z và số 2-7).',
+        ephemeral: true
+      });
+      return;
+    }
+
+    secretToUse = rawSecret;
+    source = 'manual secret';
+  } else if (label) {
+    secretToUse = userData.secrets[label];
+    source = `label \`${label}\``;
+  } else {
+    secretToUse = userData.secrets.default || userData.enabledSecret;
+    source = 'label `default`';
+  }
+
+  if (!secretToUse) {
     await interaction.reply({
-      content: 'You need to enable authenticator first with `/auth-setup` and `/auth-verify`.',
+      content: 'Không tìm thấy secret. Dùng `/auth-save`, hoặc truyền `secret` trực tiếp, hoặc setup mặc định bằng `/auth-setup` + `/auth-verify`.',
       ephemeral: true
     });
     return;
   }
 
-  const code = speakeasy.totp({
-    secret: userData.enabledSecret,
-    encoding: 'base32',
-    digits: 6
-  });
+  const code = generateTotp(secretToUse);
 
   await interaction.reply({
-    content: `🔐 Current TOTP code: **${code}** (valid ~30s, same standard as Google Authenticator).`,
+    content: `🔐 Current TOTP code: **${code}** (source: ${source}, valid ~30s).`,
+    ephemeral: true
+  });
+}
+
+async function handleSave(interaction, store) {
+  const userId = interaction.user.id;
+  const userData = getUserVault(store, userId);
+  const label = normalizeCode(interaction.options.getString('label', true)).toLowerCase();
+  const secret = normalizeSecret(interaction.options.getString('secret', true));
+
+  if (!/^[a-z0-9_-]{2,32}$/.test(label)) {
+    await interaction.reply({
+      content: '❌ Label chỉ được chứa chữ thường, số, `_` hoặc `-`, độ dài 2-32.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  if (!isLikelyBase32(secret)) {
+    await interaction.reply({
+      content: '❌ Secret không hợp lệ. Hãy nhập Base32 (A-Z và số 2-7).',
+      ephemeral: true
+    });
+    return;
+  }
+
+  userData.secrets[label] = secret;
+  writeStore(store);
+
+  await interaction.reply({
+    content: `✅ Saved secret with label \`${label}\`. Dùng /auth-code label:${label} để lấy mã 6 số.`,
+    ephemeral: true
+  });
+}
+
+async function handleList(interaction, store) {
+  const userId = interaction.user.id;
+  const userData = getUserVault(store, userId);
+  const labels = Object.keys(userData.secrets || {}).sort();
+
+  if (labels.length === 0) {
+    await interaction.reply({
+      content: 'Bạn chưa lưu secret nào. Dùng `/auth-save` để thêm.',
+      ephemeral: true
+    });
+    return;
+  }
+
+  await interaction.reply({
+    content: `📋 Saved labels (${labels.length}): ${labels.map((x) => `\`${x}\``).join(', ')}`,
+    ephemeral: true
+  });
+}
+
+async function handleRemove(interaction, store) {
+  const userId = interaction.user.id;
+  const userData = getUserVault(store, userId);
+  const label = normalizeCode(interaction.options.getString('label', true)).toLowerCase();
+
+  if (!userData.secrets[label]) {
+    await interaction.reply({
+      content: `Không tìm thấy label \`${label}\`.`,
+      ephemeral: true
+    });
+    return;
+  }
+
+  delete userData.secrets[label];
+
+  if (label === 'default') {
+    userData.enabledSecret = null;
+  }
+
+  writeStore(store);
+
+  await interaction.reply({
+    content: `🗑️ Đã xóa label \`${label}\`.`,
     ephemeral: true
   });
 }
@@ -323,6 +489,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     if (interaction.commandName === 'auth-code') {
       await handleCode(interaction, store);
+      return;
+    }
+
+    if (interaction.commandName === 'auth-save') {
+      await handleSave(interaction, store);
+      return;
+    }
+
+    if (interaction.commandName === 'auth-list') {
+      await handleList(interaction, store);
+      return;
+    }
+
+    if (interaction.commandName === 'auth-remove') {
+      await handleRemove(interaction, store);
       return;
     }
 
