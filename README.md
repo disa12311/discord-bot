@@ -54,13 +54,13 @@ GUILD_ID=123456789012345678
 
 ## Bảo mật nâng cao (Base64 + Encryption)
 Bot đã nâng cấp lưu secret theo hướng bảo mật hơn:
-- Khi có `SECRET_ENCRYPTION_KEY_BASE64`, secret được mã hóa **AES-256-GCM** trước khi lưu.
+- Khi có `SECRET_ENCRYPTION_KEY_BASE64` (64-byte), secret được mã hóa **AES-256-GCM** trước khi lưu.
 - Payload lưu trữ ở dạng chuỗi base64 (iv/tag/ciphertext), không còn plain text.
 - Nếu thiếu key, bot vẫn chạy tương thích ngược nhưng không mã hóa (không khuyến nghị).
 
-Thiết lập key (32-byte base64):
+Thiết lập key (64-byte base64):
 ```bash
-openssl rand -base64 32
+openssl rand -base64 64
 ```
 
 Rồi set vào `.env`:

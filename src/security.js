@@ -8,10 +8,10 @@ function createSecretCodec(base64Key) {
   if (base64Key) {
     try {
       const parsed = Buffer.from(base64Key, 'base64');
-      if (parsed.length === 32) {
-        key = parsed;
+      if (parsed.length === 64) {
+        key = crypto.createHash('sha256').update(parsed).digest();
       } else {
-        console.error('SECRET_ENCRYPTION_KEY_BASE64 must decode to exactly 32 bytes.');
+        console.error('SECRET_ENCRYPTION_KEY_BASE64 must decode to exactly 64 bytes.');
       }
     } catch (error) {
       console.error('Invalid SECRET_ENCRYPTION_KEY_BASE64 format:', error.message);
