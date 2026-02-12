@@ -38,9 +38,7 @@ const slashCommands = [
   new SlashCommandBuilder()
     .setName('auth-remove')
     .setDescription('Remove one saved secret by label.')
-    .addStringOption((option) =>
-      option.setName('label').setDescription('Label to remove').setRequired(true)
-    ),
+    .addStringOption((option) => option.setName('label').setDescription('Label to remove').setRequired(true)),
   new SlashCommandBuilder()
     .setName('auth-code')
     .setDescription('Generate a current 6-digit TOTP code.')
@@ -59,13 +57,11 @@ const slashCommands = [
   new SlashCommandBuilder()
     .setName('auth-set-default')
     .setDescription('Set one saved label as default for /auth-code.')
-    .addStringOption((option) =>
-      option.setName('label').setDescription('Label to mark as default').setRequired(true)
-    ),
+    .addStringOption((option) => option.setName('label').setDescription('Label to mark as default').setRequired(true)),
   new SlashCommandBuilder().setName('auth-status').setDescription('Show vault status and default label.')
 ].map((c) => c.toJSON());
 
-function createCommandHandlers({ writeStore, generateTotp }) {
+function createCommandHandlers({ writeStore, generateTotp, encryptSecret, decryptSecret, encryptionEnabled }) {
   async function handleSave(interaction, store) {
     const userId = interaction.user.id;
     const userData = getUserVault(store, userId);
@@ -89,7 +85,7 @@ function createCommandHandlers({ writeStore, generateTotp }) {
       return;
     }
 
-    userData.secrets[label] = secret;
+    userData.secrets[label] = encryptSecret(secret);
     if (!userData.defaultLabel) {
       userData.defaultLabel = label;
     }
@@ -97,7 +93,7 @@ function createCommandHandlers({ writeStore, generateTotp }) {
     await writeStore(store);
 
     await interaction.reply({
-      content: `✅ Saved secret with label \`${label}\`. Dùng /auth-code label:${label} để lấy mã 6 số.`,
+      content: `✅ Saved secret with label \`${label}\`${encryptionEnabled ? ' (encrypted/base64).' : ''}. Dùng /auth-code label:${label} để lấy mã 6 số.`,
       ephemeral: true
     });
   }
@@ -180,11 +176,21 @@ function createCommandHandlers({ writeStore, generateTotp }) {
       secretToUse = rawSecret;
       source = 'manual secret';
     } else if (label) {
-      secretToUse = userData.secrets[label];
       source = `label \`${label}\``;
+      try {
+        secretToUse = decryptSecret(userData.secrets[label]);
+      } catch {
+        await interaction.reply({ content: '❌ Không thể giải mã secret. Kiểm tra SECRET_ENCRYPTION_KEY_BASE64.', ephemeral: true });
+        return;
+      }
     } else if (userData.defaultLabel) {
-      secretToUse = userData.secrets[userData.defaultLabel];
       source = `default label \`${userData.defaultLabel}\``;
+      try {
+        secretToUse = decryptSecret(userData.secrets[userData.defaultLabel]);
+      } catch {
+        await interaction.reply({ content: '❌ Không thể giải mã secret mặc định. Kiểm tra SECRET_ENCRYPTION_KEY_BASE64.', ephemeral: true });
+        return;
+      }
     }
 
     if (!secretToUse) {
@@ -214,12 +220,12 @@ function createCommandHandlers({ writeStore, generateTotp }) {
     const labels = Object.keys(userData.secrets || {});
 
     await interaction.reply({
-      content: `Vault status: **${labels.length}** labels saved.${userData.defaultLabel ? ` Default: \`${userData.defaultLabel}\`.` : ' No default set.'}`,
+      content: `Vault status: **${labels.length}** labels saved.${userData.defaultLabel ? ` Default: \`${userData.defaultLabel}\`.` : ' No default set.'}${encryptionEnabled ? ' Encryption: **ON**.' : ' Encryption: **OFF**.'}`,
       ephemeral: true
     });
   }
 
-  const handlers = {
+  return {
     'auth-save': handleSave,
     'auth-list': handleList,
     'auth-remove': handleRemove,
@@ -227,8 +233,6 @@ function createCommandHandlers({ writeStore, generateTotp }) {
     'auth-code': handleCode,
     'auth-status': handleStatus
   };
-
-  return handlers;
 }
 
 module.exports = {

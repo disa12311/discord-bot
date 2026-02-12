@@ -2,6 +2,7 @@ const { Client, GatewayIntentBits, Events } = require('discord.js');
 const config = require('./config');
 const { createStorage } = require('./storage');
 const { generateTotp } = require('./totp');
+const { createSecretCodec } = require('./security');
 const { slashCommands, createCommandHandlers } = require('./commands');
 
 if (!config.discordToken) {
@@ -10,9 +11,13 @@ if (!config.discordToken) {
 }
 
 const storage = createStorage(config);
+const secretCodec = createSecretCodec(config.secretEncryptionKeyBase64);
 const handlers = createCommandHandlers({
   writeStore: storage.writeStore,
-  generateTotp
+  generateTotp,
+  encryptSecret: secretCodec.encryptSecret,
+  decryptSecret: secretCodec.decryptSecret,
+  encryptionEnabled: secretCodec.encryptionEnabled
 });
 
 async function registerCommands(client) {
@@ -32,6 +37,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 client.once(Events.ClientReady, async (readyClient) => {
   try {
     console.log(`Logged in as ${readyClient.user.tag}`);
+    console.log(`Secret encryption: ${secretCodec.encryptionEnabled ? 'enabled' : 'disabled'}.`);
     await storage.initStorage();
     await registerCommands(readyClient);
   } catch (error) {

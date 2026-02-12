@@ -52,6 +52,22 @@ GUILD_ID=123456789012345678
 - `src/config.js`: đọc biến môi trường
 - `src/validators.js`: normalize/validate input
 
+## Bảo mật nâng cao (Base64 + Encryption)
+Bot đã nâng cấp lưu secret theo hướng bảo mật hơn:
+- Khi có `SECRET_ENCRYPTION_KEY_BASE64`, secret được mã hóa **AES-256-GCM** trước khi lưu.
+- Payload lưu trữ ở dạng chuỗi base64 (iv/tag/ciphertext), không còn plain text.
+- Nếu thiếu key, bot vẫn chạy tương thích ngược nhưng không mã hóa (không khuyến nghị).
+
+Thiết lập key (32-byte base64):
+```bash
+openssl rand -base64 32
+```
+
+Rồi set vào `.env`:
+```env
+SECRET_ENCRYPTION_KEY_BASE64=<your_generated_key>
+```
+
 ## MongoDB
 Bot đã hỗ trợ MongoDB để lưu vault ổn định hơn.
 
@@ -72,5 +88,5 @@ Trong phần Bot:
 
 ## Bảo mật
 - Kết quả lệnh được trả bằng **ephemeral** để hạn chế lộ mã.
-- Secret đang lưu local tại `data/user-secrets.json`.
-- Nên dùng DB + encryption cho production.
+- Secret lưu local hoặc MongoDB; khi có key thì dữ liệu secret được mã hóa AES-256-GCM dạng base64 payload.
+- Luôn cấu hình `SECRET_ENCRYPTION_KEY_BASE64` trên production.
