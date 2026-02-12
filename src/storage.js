@@ -10,6 +10,28 @@ function createStorage(config) {
   let mongoCollection = null;
   const isMongoEnabled = Boolean(config.mongodbUri);
 
+  function buildMongoClientOptions(tlsValue) {
+    const options = {
+      serverSelectionTimeoutMS: config.mongodbServerSelectionTimeoutMs,
+      tls: tlsValue
+    };
+
+    if (config.mongodbTlsAllowInvalidCertificates) {
+      options.tlsAllowInvalidCertificates = true;
+    }
+
+    return options;
+  }
+
+  async function connectMongo(tlsValue) {
+    const options = buildMongoClientOptions(tlsValue);
+    const client = new MongoClient(config.mongodbUri, options);
+    await client.connect();
+    const collection = client.db(config.mongodbDb).collection(config.mongodbCollection);
+    await collection.createIndex({ userId: 1 }, { unique: true });
+    return { client, collection, options };
+  }
+
   async function initStorage() {
     if (!isMongoEnabled) {
       console.log('Storage mode: local file JSON.');
@@ -17,26 +39,30 @@ function createStorage(config) {
     }
 
     try {
-      const mongoClientOptions = {
-        serverSelectionTimeoutMS: config.mongodbServerSelectionTimeoutMs
-      };
-
-      if (typeof config.mongodbTls === 'boolean') {
-        mongoClientOptions.tls = config.mongodbTls;
-      }
-
-      if (config.mongodbTlsAllowInvalidCertificates) {
-        mongoClientOptions.tlsAllowInvalidCertificates = true;
-      }
-
-      mongoClient = new MongoClient(config.mongodbUri, mongoClientOptions);
-      await mongoClient.connect();
-      mongoCollection = mongoClient.db(config.mongodbDb).collection(config.mongodbCollection);
-      await mongoCollection.createIndex({ userId: 1 }, { unique: true });
-      console.log(`Storage mode: MongoDB (${config.mongodbDb}.${config.mongodbCollection}).`);
+      const result = await connectMongo(config.mongodbTls);
+      mongoClient = result.client;
+      mongoCollection = result.collection;
+      console.log(`Storage mode: MongoDB (${config.mongodbDb}.${config.mongodbCollection}) with tls=${result.options.tls}.`);
+      return;
     } catch (error) {
-      console.error('MongoDB connection failed, fallback to local JSON store:', error.message);
-      console.error('Tip: check MONGODB_TLS / MONGODB_TLS_ALLOW_INVALID_CERTIFICATES if your server has TLS constraints.');
+      const canRetryWithoutTls = config.mongodbTls === true && !config.mongodbUri.startsWith('mongodb+srv://');
+
+      if (canRetryWithoutTls) {
+        console.warn('MongoDB connect failed with tls=true, retrying with tls=false...');
+
+        try {
+          const retried = await connectMongo(false);
+          mongoClient = retried.client;
+          mongoCollection = retried.collection;
+          console.warn(`MongoDB connected after TLS fallback (tls=${retried.options.tls}).`);
+          return;
+        } catch (retryError) {
+          console.warn('MongoDB retry with tls=false failed:', retryError.message);
+        }
+      }
+
+      console.warn('MongoDB unavailable, fallback to local JSON store:', error.message);
+      console.warn('Tip: check MONGODB_TLS / MONGODB_TLS_ALLOW_INVALID_CERTIFICATES if your server has TLS constraints.');
       mongoClient = null;
       mongoCollection = null;
     }

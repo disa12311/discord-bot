@@ -80,9 +80,12 @@ MONGODB_COLLECTION=user_vaults
 
 - Nếu có `MONGODB_URI`: bot dùng MongoDB.
 - Nếu không có: bot tự fallback về file `data/user-secrets.json`.
+- Mặc định TLS được tự suy luận: `mongodb+srv://` => bật TLS, `mongodb://` => tắt TLS.
 
 
 ### Xử lý lỗi TLS MongoDB trong container
+Bot cũng tự thử lại 1 lần với `tls=false` khi lần kết nối đầu `tls=true` thất bại (chỉ cho `mongodb://`).
+
 Nếu bạn thấy lỗi kiểu `SSL routines ... tlsv1 alert internal error`:
 - Nếu Mongo của bạn **không dùng TLS**, set:
 ```env
