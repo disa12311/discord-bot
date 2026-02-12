@@ -100,6 +100,14 @@ MONGODB_TLS_ALLOW_INVALID_CERTIFICATES=true
 MONGODB_SERVER_SELECTION_TIMEOUT_MS=10000
 ```
 
+### Deploy trên Railway
+- Railway thường inject biến môi trường trực tiếp, nên chỉ cần set:
+  - `DISCORD_TOKEN`
+  - `MONGODB_URI` (nếu dùng Mongo)
+  - `SECRET_ENCRYPTION_KEY_BASE64`
+- `MONGODB_TLS` nên để trống để bot auto-detect theo URI.
+- Nếu service Mongo trên Railway yêu cầu mode cố định, set thủ công `MONGODB_TLS=true` hoặc `MONGODB_TLS=false`.
+
 ## Lưu ý cấu hình Discord Developer Portal
 Trong phần Bot:
 - **Không cần** bật `MESSAGE CONTENT INTENT`.

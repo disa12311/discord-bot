@@ -45,24 +45,25 @@ function createStorage(config) {
       console.log(`Storage mode: MongoDB (${config.mongodbDb}.${config.mongodbCollection}) with tls=${result.options.tls}.`);
       return;
     } catch (error) {
-      const canRetryWithoutTls = config.mongodbTls === true && !config.mongodbUri.startsWith('mongodb+srv://');
+      const canAutoFlipTls = !config.mongodbTlsExplicit && !config.mongodbUri.startsWith('mongodb+srv://');
 
-      if (canRetryWithoutTls) {
-        console.warn('MongoDB connect failed with tls=true, retrying with tls=false...');
+      if (canAutoFlipTls) {
+        const flippedTls = !config.mongodbTls;
+        console.warn(`MongoDB connect failed with tls=${config.mongodbTls}, retrying with tls=${flippedTls}...`);
 
         try {
-          const retried = await connectMongo(false);
+          const retried = await connectMongo(flippedTls);
           mongoClient = retried.client;
           mongoCollection = retried.collection;
-          console.warn(`MongoDB connected after TLS fallback (tls=${retried.options.tls}).`);
+          console.warn(`MongoDB connected after TLS auto-flip (tls=${retried.options.tls}).`);
           return;
         } catch (retryError) {
-          console.warn('MongoDB retry with tls=false failed:', retryError.message);
+          console.warn(`MongoDB retry with tls=${flippedTls} failed:`, retryError.message);
         }
       }
 
       console.warn('MongoDB unavailable, fallback to local JSON store:', error.message);
-      console.warn('Tip: check MONGODB_TLS / MONGODB_TLS_ALLOW_INVALID_CERTIFICATES if your server has TLS constraints.');
+      console.warn('Tip (Railway): set MONGODB_TLS=true/false explicitly if your Mongo service requires a specific TLS mode.');
       mongoClient = null;
       mongoCollection = null;
     }
