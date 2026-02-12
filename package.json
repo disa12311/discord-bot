@@ -1,0 +1,26 @@
+{
+  "name": "discord-bot-authenticator",
+  "version": "1.0.0",
+  "description": "Discord bot with TOTP authenticator setup and verification commands",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js && node --check src/bot.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "2fa",
+    "totp",
+    "authenticator"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "dotenv": "^16.4.5",
+    "qrcode": "^1.5.4",
+    "otplib": "^12.0.1",
+    "mongodb": "^6.10.0"
+  }
+}
